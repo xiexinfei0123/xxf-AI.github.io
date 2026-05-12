@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>台北市 YouBike 即時地圖儀表板</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Leaflet CSS 用於地圖樣式 -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- 引入 Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f8fafc;
+        }
+        #map {
+            height: 500px;
+            width: 100%;
+            border-radius: 1.5rem;
+            z-index: 1;
+        }
+        .card-transition {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .card-transition:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .leaflet-popup-content-wrapper {
+            border-radius: 12px;
+            padding: 5px;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto">
+        <!-- 標題 -->
+        <header class="mb-8 text-center md:text-left flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-800 tracking-tight">YouBike 2.0 即時地圖儀表板</h1>
+                <p id="location-display" class="text-slate-500 mt-1">目前定位：北一女中校區周邊</p>
+            </div>
+            <div class="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-100">
+                <div id="status-dot" class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                <span id="status-text" class="text-sm font-medium text-slate-600">準備就緒</span>
+            </div>
+        </header>
+
+        <!-- 主要佈局 -->
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+            
+            <!-- 左側：控制與列表 -->
+            <div class="lg:col-span-1 space-y-6">
+                <div class="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 space-y-3">
+                    <button id="fetch-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-blue-100 transition-all active:scale-95 flex items-center justify-center gap-3">
+                        <span id="btn-icon">🔄</span>
+                        <span id="btn-text">重新整理數據</span>
+                    </button>
+                    
+                    <button id="locate-me-btn" class="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold py-3 px-6 rounded-2xl border border-blue-100 transition-all flex items-center justify-center gap-3">
+                        <span>🎯</span>
+                        <span>定位我的位置</span>
+                    </button>
+
+                    <button id="locate-tfg-btn" class="w-full bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold py-3 px-6 rounded-2xl border border-slate-100 transition-all flex items-center justify-center gap-3">
+                        <span>📍</span>
+                        <span>回到北一女中</span>
+                    </button>
+                </div>
+
+                <div class="space-y-4">
+                    <h2 class="text-lg font-bold text-slate-700 px-2 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                        </svg>
+                        鄰近站點列表
+                    </h2>
+                    <div id="list-container" class="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                        <div class="text-center text-slate-400 py-10">資料載入中...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右側：地圖展示 -->
+            <div class="lg:col-span-3 space-y-4">
+                <div class="bg-white p-2 rounded-[2rem] shadow-xl border border-slate-100 relative">
+                    <div id="map"></div>
+                    <!-- 地圖圖例 -->
+                    <div class="absolute bottom-6 right-6 z-[1000] bg-white/90 backdrop-blur-sm p-3 rounded-xl shadow-lg text-xs font-bold text-slate-700 border border-white space-y-2">
+                        <div class="flex items-center gap-2">
+                            <span class="w-3 h-3 bg-green-500 rounded-full"></span> 車源充足 (>5)
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-3 h-3 bg-orange-500 rounded-full"></span> 車源較少 (1-5)
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-3 h-3 bg-red-500 rounded-full"></span> 無車可用 (0)
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="info-banner" class="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-center gap-4 transition-colors">
+                    <div id="banner-icon-bg" class="bg-blue-100 p-2 rounded-lg text-blue-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <p id="banner-text" class="text-sm text-blue-800 leading-relaxed">
+                        <b>系統訊息：</b> 歡迎使用！地圖已標註中心點附近 1 公里內的所有 YouBike 站點。
+                    </p>
+                </div>
+            </div>
+
+        </div>
+
+        <footer class="mt-12 text-center text-slate-400 text-xs">
+            © 2024 YouBike 即時地圖系統 | 資料來源：台北市政府開放資料平台
+        </footer>
+    </div>
+
+    <!-- 引入 Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <script>
+        // 使用 Proxy 繞過潛在的 CORS 限制（如果直接連線失敗時）
+        const PRIMARY_API_URL = 'https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json';
+        const TFG_COORDS = [25.038064, 121.513586]; 
+        
+        let currentCenter = TFG_COORDS;
+        let isUserLocated = false;
+
+        const fetchBtn = document.getElementById('fetch-btn');
+        const locateTfgBtn = document.getElementById('locate-tfg-btn');
+        const locateMeBtn = document.getElementById('locate-me-btn');
+        const btnText = document.getElementById('btn-text');
+        const btnIcon = document.getElementById('btn-icon');
+        const statusText = document.getElementById('status-text');
+        const statusDot = document.getElementById('status-dot');
+        const listContainer = document.getElementById('list-container');
+        const locationDisplay = document.getElementById('location-display');
+        const bannerText = document.getElementById('banner-text');
+        const bannerIconBg = document.getElementById('banner-icon-bg');
+
+        let map;
+        let markerGroup;
+        let userMarker;
+
+        // 初始化地圖
+        function initMap() {
+            try {
+                map = L.map('map').setView(currentCenter, 17);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(map);
+                markerGroup = L.layerGroup().addTo(map);
+                updateReferenceMarker();
+            } catch (e) {
+                console.error("Map Init Error:", e);
+            }
+        }
+
+        // 更新中心標記
+        function updateReferenceMarker() {
+            if (!map) return;
+            if (userMarker) map.removeLayer(userMarker);
+            const title = isUserLocated ? "您的位置" : "北一女中校區";
+            userMarker = L.marker(currentCenter).addTo(map)
+                .bindPopup(`<b>${title}</b>`)
+                .openPopup();
+        }
+
+        // 距離計算
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; 
+            const φ1 = lat1 * Math.PI/180;
+            const φ2 = lat2 * Math.PI/180;
+            const Δφ = (lat2-lat1) * Math.PI/180;
+            const Δλ = (lon2-lon1) * Math.PI/180;
+            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        // 強化版的資料抓取函式，加入重試邏輯
+        async function fetchWithRetry(url, retries = 3, delay = 1000) {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url, { cache: "no-store" });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    if (i === retries - 1) throw e;
+                    await new Promise(res => setTimeout(res, delay));
+                }
+            }
+        }
+
+        // 更新儀表板
+        async function updateDashboard() {
+            fetchBtn.disabled = true;
+            btnText.innerText = "連線中...";
+            btnIcon.innerHTML = '<span class="loader"></span>';
+            statusDot.className = "w-3 h-3 bg-yellow-500 rounded-full animate-pulse";
+
+            try {
+                const data = await fetchWithRetry(PRIMARY_API_URL);
+                
+                if (!Array.isArray(data)) throw new Error("資料格式錯誤");
+
+                const nearbyStations = data
+                    .map(s => ({
+                        ...s,
+                        distance: getDistance(currentCenter[0], currentCenter[1], s.latitude, s.longitude)
+                    }))
+                    .filter(s => s.distance < 1500) // 擴大到 1.5 公里確保有資料
+                    .sort((a, b) => a.distance - b.distance);
+
+                renderMarkers(nearbyStations);
+                renderList(nearbyStations.slice(0, 15));
+                
+                statusText.innerText = `最後更新: ${new Date().toLocaleTimeString()}`;
+                statusDot.className = "w-3 h-3 bg-green-500 rounded-full animate-pulse";
+            } catch (error) {
+                console.error("Dashboard Update Error:", error);
+                statusText.innerText = "更新失敗，請檢查網路";
+                statusDot.className = "w-3 h-3 bg-red-500 rounded-full";
+                
+                bannerText.innerHTML = `<b>讀取失敗：</b> 無法從政府 API 獲取即時資料。請確認您的網路連線或稍後再試。`;
+                bannerIconBg.className = "bg-red-100 p-2 rounded-lg text-red-600";
+                listContainer.innerHTML = `<div class="p-4 bg-red-50 text-red-600 rounded-xl text-sm text-center">連線失敗 (${error.message})</div>`;
+            } finally {
+                fetchBtn.disabled = false;
+                btnText.innerText = "重新整理數據";
+                btnIcon.innerText = "🔄";
+            }
+        }
+
+        function renderMarkers(stations) {
+            if (!markerGroup) return;
+            markerGroup.clearLayers();
+            stations.forEach((station) => {
+                const bikes = station.available_return_bikes;
+                const name = station.sna.replace('YouBike2.0_', '');
+                let color = bikes === 0 ? '#ef4444' : (bikes <= 5 ? '#f97316' : '#22c55e');
+
+                const marker = L.circleMarker([station.latitude, station.longitude], {
+                    radius: 10, fillColor: color, color: "#fff", weight: 2, opacity: 1, fillOpacity: 0.9
+                });
+
+                marker.bindPopup(`
+                    <div class="p-1">
+                        <p class="font-bold text-blue-700">${name}</p>
+                        <p class="text-[10px] text-slate-500 mb-2">${station.ar}</p>
+                        <div class="grid grid-cols-2 gap-2 text-center bg-slate-50 rounded-lg p-2">
+                            <div><span class="block text-[9px] text-slate-400 font-bold uppercase">可借</span><span class="text-lg font-black text-slate-800">${bikes}</span></div>
+                            <div><span class="block text-[9px] text-slate-400 font-bold uppercase">空位</span><span class="text-lg font-black text-slate-800">${station.available_return_slots}</span></div>
+                        </div>
+                    </div>
+                `);
+                markerGroup.addLayer(marker);
+            });
+        }
+
+        function renderList(stations) {
+            listContainer.innerHTML = '';
+            if (stations.length === 0) {
+                listContainer.innerHTML = '<p class="text-center text-slate-400 py-10">周邊無可用站點</p>';
+                return;
+            }
+
+            stations.forEach((station) => {
+                const bikes = station.available_return_bikes;
+                const colorClass = bikes > 5 ? 'text-green-600' : (bikes > 0 ? 'text-orange-500' : 'text-red-500');
+                const name = station.sna.replace('YouBike2.0_', '');
+
+                const item = document.createElement('div');
+                item.className = "card-transition bg-white p-4 rounded-2xl border border-slate-100 flex justify-between items-center cursor-pointer";
+                item.onclick = () => map.flyTo([station.latitude, station.longitude], 18);
+                
+                item.innerHTML = `
+                    <div class="overflow-hidden">
+                        <h3 class="font-bold text-slate-800 truncate">${name}</h3>
+                        <p class="text-[10px] text-slate-400">距離約 ${Math.round(station.distance)}m</p>
+                    </div>
+                    <div class="text-right flex-shrink-0 ml-2">
+                        <span class="block text-[10px] text-slate-400 font-bold">可借</span>
+                        <span class="text-xl font-black ${colorClass}">${bikes}</span>
+                    </div>
+                `;
+                listContainer.appendChild(item);
+            });
+        }
+
+        // 按鈕監聽
+        locateMeBtn.addEventListener('click', () => {
+            if (!navigator.geolocation) return;
+            statusText.innerText = "GPS 定位中...";
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    currentCenter = [pos.coords.latitude, pos.coords.longitude];
+                    isUserLocated = true;
+                    locationDisplay.innerText = "目前定位：您的當前位置";
+                    map.flyTo(currentCenter, 17);
+                    updateReferenceMarker();
+                    updateDashboard();
+                },
+                (err) => {
+                    console.warn(err);
+                    bannerText.innerText = "無法取得位置資訊，請檢查權限設定。";
+                }
+            );
+        });
+
+        locateTfgBtn.addEventListener('click', () => {
+            currentCenter = TFG_COORDS;
+            isUserLocated = false;
+            locationDisplay.innerText = "目前定位：北一女中校區周邊";
+            map.flyTo(currentCenter, 17);
+            updateReferenceMarker();
+            updateDashboard();
+        });
+
+        fetchBtn.addEventListener('click', updateDashboard);
+
+        // 初始化
+        window.onload = () => {
+            initMap();
+            updateDashboard();
+        };
+    </script>
+</body>
+</html>
